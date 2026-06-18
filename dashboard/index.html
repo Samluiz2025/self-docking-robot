@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Self-Docking Robot — Live Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chart.js/4.4.0/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <span class="title">Self-Docking Robot</span>
+      <span id="conn-badge" class="badge disconnected">Disconnected</span>
+    </div>
+    <div class="header-right">
+      <span id="robot-state" class="state-badge">--</span>
+      <button id="btn-dock" onclick="triggerDock()">Return to Dock</button>
+      <button id="btn-stop" onclick="emergencyStop()">STOP</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Map panel -->
+    <section class="panel map-panel">
+      <h2>Live Map</h2>
+      <canvas id="map-canvas" width="400" height="400"></canvas>
+      <p class="hint">Click on free space to navigate there</p>
+    </section>
+
+    <!-- Camera -->
+    <section class="panel camera-panel">
+      <h2>Camera Feed</h2>
+      <img id="camera-img" src="" alt="Camera feed loading...">
+    </section>
+
+    <!-- Battery chart -->
+    <section class="panel chart-panel">
+      <h2>Battery Voltage</h2>
+      <canvas id="battery-chart"></canvas>
+      <div class="metric-row">
+        <span>Voltage: <strong id="batt-v">--</strong> V</span>
+        <span>Current: <strong id="batt-a">--</strong> A</span>
+        <span>Charge: <strong id="batt-pct">--</strong>%</span>
+      </div>
+    </section>
+
+    <!-- Sensors -->
+    <section class="panel sensor-panel">
+      <h2>Sensors</h2>
+      <div class="sensor-row">
+        <div class="sensor-item">
+          <div class="sensor-label">Front Obstacle</div>
+          <div id="sensor-uss" class="sensor-value">-- m</div>
+        </div>
+        <div class="sensor-item">
+          <div class="sensor-label">IR Beacon</div>
+          <div id="sensor-ir" class="sensor-value">--</div>
+        </div>
+        <div class="sensor-item">
+          <div class="sensor-label">Speed</div>
+          <div id="sensor-spd" class="sensor-value">-- m/s</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Mission log -->
+    <section class="panel log-panel">
+      <h2>Mission Log <button onclick="clearLog()" style="float:right;font-size:11px">Clear</button></h2>
+      <div id="mission-log"></div>
+    </section>
+  </main>
+
+  <script src="js/dashboard.js"></script>
+</body>
+</html>

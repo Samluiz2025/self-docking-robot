@@ -1,0 +1,65 @@
+# Hardware parameters — edit these to match your physical robot
+motor_controller:
+  ros__parameters:
+    # GPIO pins (BCM numbering)
+    pin_in1: 17
+    pin_in2: 18
+    pin_in3: 22
+    pin_in4: 23
+    pin_ena: 12   # PWM left motor
+    pin_enb: 13   # PWM right motor
+    pwm_frequency: 1000   # Hz
+    max_speed: 0.3        # m/s
+    watchdog_timeout: 0.5 # seconds
+
+odometry:
+  ros__parameters:
+    wheel_separation: 0.20    # meters, center-to-center
+    wheel_radius: 0.0325      # meters
+    ticks_per_revolution: 480 # encoder ticks per full wheel revolution
+    pin_enc_left_a: 5
+    pin_enc_left_b: 6
+    pin_enc_right_a: 19
+    pin_enc_right_b: 26
+    publish_rate: 20.0        # Hz
+
+sensor_nodes:
+  ros__parameters:
+    # Ultrasonic HC-SR04
+    ultrasonic_trig_pin: 24
+    ultrasonic_echo_pin: 25
+    ultrasonic_max_range: 4.0
+    ultrasonic_publish_rate: 10.0
+    # IR beacon
+    ir_receiver_pin: 21
+    # INA219 (I2C)
+    ina219_i2c_address: 0x40
+    battery_full_voltage: 12.6
+    battery_empty_voltage: 9.6
+    battery_publish_rate: 1.0
+
+aruco_detector:
+  ros__parameters:
+    camera_device: /dev/video0
+    image_width: 640
+    image_height: 480
+    fps: 15
+    aruco_dict: DICT_4X4_50
+    dock_marker_id: 0
+    dock_approach_distance: 0.15  # meters — stop at 15cm
+    pid_lateral_kp: 0.003
+    pid_lateral_ki: 0.0001
+    pid_lateral_kd: 0.001
+
+state_machine:
+  ros__parameters:
+    battery_low_threshold: 0.20     # 20%
+    battery_charged_threshold: 0.80 # 80%
+    dock_x: 2.0   # map coordinates of dock (meters)
+    dock_y: 0.5
+    dock_approach_x: 1.5  # 0.5m in front of dock
+    dock_approach_y: 0.5
+    seek_angular_speed: 0.3   # rad/s during IR seeking
+    approach_linear_speed: 0.1 # m/s during IR approach
+    final_linear_speed: 0.04   # m/s during final cm
+    undock_distance: 0.5      # meters to back up after undock

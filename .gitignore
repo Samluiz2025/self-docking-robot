@@ -1,0 +1,37 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+*.pyc
+__pycache__/
+*.egg-info/
+.eggs/
+
+# ROS2 bags
+*.db3
+*.yaml.bak
+
+# Python
+.env
+venv/
+.venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maps (large binary files — commit selectively)
+maps/*.pgm
+
+# Compiled C extensions
+*.so
+
+# Logs
+*.log

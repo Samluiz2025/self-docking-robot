@@ -17,4 +17,7 @@
   <exec_depend>state_machine</exec_depend>
   <buildtool_depend>ament_python</buildtool_depend>
   <test_depend>ament_lint_auto</test_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
 </package>

@@ -66,6 +66,7 @@ class MotorControllerNode(Node):
         self._set_motors(v_left, v_right)
 
     def _set_motors(self, v_left: float, v_right: float):
+        self.get_logger().info(f'v_left={v_left:.2f} v_right={v_right:.2f}')
         def to_pwm(v):
             pct = abs(v) / self.max_speed * 100.0
             return min(max(pct, 0.0), 100.0)

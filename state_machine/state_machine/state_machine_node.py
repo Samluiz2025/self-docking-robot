@@ -19,10 +19,9 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from std_msgs.msg import String, Bool
 from sensor_msgs.msg import BatteryState
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PoseStamped
 from nav2_msgs.action import NavigateToPose
-from geometry_msgs.msg import PoseStamped
-from enum import Enum, auto
+from enum import Enum
 
 
 class State(str, Enum):
@@ -51,23 +50,24 @@ class StateMachineNode(Node):
         self.low_thresh     = p('battery_low_threshold')
         self.charged_thresh = p('battery_charged_threshold')
         self.seek_omega     = p('seek_angular_speed')
-        self.approach_v     = p('approach_linear_speed')
 
-        self.state = State.IDLE
+        self.state       = State.IDLE
         self.battery_pct = 1.0
         self.ir_detected = False
 
-        # Publishers
-        self.state_pub = self.create_publisher(String, '/robot_state', 10)
-        self.cmd_pub   = self.create_publisher(Twist, '/cmd_vel', 10)
+        # Bug fix: without this flag, LOW_BATTERY sent a Nav2 goal every 100ms
+        self._nav_goal_sent = False
+        # Bug fix: tracks when undocking started so we can time the backup
+        self._undock_start  = None
 
-        # Subscriptions
+        self.state_pub = self.create_publisher(String, '/robot_state', 10)
+        self.cmd_pub   = self.create_publisher(Twist,  '/cmd_vel',     10)
+
         self.create_subscription(BatteryState, '/battery_state',    self._battery_cb, 10)
         self.create_subscription(Bool,         '/ir_dock_detected', self._ir_cb,      10)
         self.create_subscription(Bool,         '/docking_complete', self._dock_cb,    10)
         self.create_subscription(Bool,         '/trigger_dock',     self._trigger_cb, 10)
 
-        # Nav2 action client
         self._nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         self.create_timer(0.1, self._update)
@@ -86,10 +86,11 @@ class StateMachineNode(Node):
             self._transition(State.DOCKED)
 
     def _trigger_cb(self, msg: Bool):
+        """Dashboard 'send to dock' button."""
         if msg.data and self.state == State.IDLE:
             self._transition(State.LOW_BATTERY)
 
-    # ── Main update loop ───────────────────────────────────────────────────
+    # ── Main loop ──────────────────────────────────────────────────────────
 
     def _update(self):
         if self.state == State.IDLE:
@@ -97,15 +98,18 @@ class StateMachineNode(Node):
                 self._transition(State.LOW_BATTERY)
 
         elif self.state == State.LOW_BATTERY:
-            self._send_nav_goal(self.get_parameter('dock_approach_x').value,
-                                self.get_parameter('dock_approach_y').value)
-            self._transition(State.SEEKING_DOCK)
+            # Send Nav2 goal ONCE — flag prevents re-sending every 100ms
+            if not self._nav_goal_sent:
+                self._send_nav_goal(
+                    self.get_parameter('dock_approach_x').value,
+                    self.get_parameter('dock_approach_y').value)
+                self._nav_goal_sent = True
+                self._transition(State.SEEKING_DOCK)
 
         elif self.state == State.SEEKING_DOCK:
             if self.ir_detected:
                 self._transition(State.APPROACHING_DOCK)
             else:
-                # Rotate in place to find IR beacon
                 twist = Twist()
                 twist.angular.z = self.seek_omega
                 self.cmd_pub.publish(twist)
@@ -114,19 +118,38 @@ class StateMachineNode(Node):
             if self.battery_pct >= self.charged_thresh:
                 self._transition(State.UNDOCKING)
 
+        elif self.state == State.UNDOCKING:
+            # Back up for (undock_distance / 0.1 m/s) seconds, then go idle
+            if self._undock_start is None:
+                self._undock_start = self.get_clock().now()
+
+            undock_dist  = self.get_parameter('undock_distance').value
+            backup_speed = 0.1
+            duration_sec = undock_dist / backup_speed
+            elapsed = (self.get_clock().now() - self._undock_start).nanoseconds / 1e9
+
+            if elapsed < duration_sec:
+                twist = Twist()
+                twist.linear.x = -backup_speed
+                self.cmd_pub.publish(twist)
+            else:
+                self._undock_start  = None
+                self._nav_goal_sent = False   # reset so next dock cycle works
+                self._transition(State.IDLE)
+
         self.state_pub.publish(String(data=str(self.state.value)))
 
     def _transition(self, new_state: State):
-        self.get_logger().info(f'State: {self.state} → {new_state}  (battery: {self.battery_pct:.0%})')
+        self.get_logger().info(
+            f'State: {self.state} → {new_state}  (battery: {self.battery_pct:.0%})')
         self.state = new_state
-        # Stop motors on any transition
-        self.cmd_pub.publish(Twist())
+        self.cmd_pub.publish(Twist())  # zero velocity on every transition
 
     def _send_nav_goal(self, x: float, y: float):
         goal = NavigateToPose.Goal()
         goal.pose = PoseStamped()
         goal.pose.header.frame_id = 'map'
-        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.header.stamp    = self.get_clock().now().to_msg()
         goal.pose.pose.position.x = x
         goal.pose.pose.position.y = y
         goal.pose.pose.orientation.w = 1.0

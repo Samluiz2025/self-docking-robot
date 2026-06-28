@@ -18,7 +18,6 @@ class MotorControllerNode(Node):
     def __init__(self):
         super().__init__('motor_controller')
 
-        # Declare parameters (defaults overridden by hardware_params.yaml)
         self.declare_parameters(namespace='', parameters=[
             ('pin_in1', 17), ('pin_in2', 18),
             ('pin_in3', 22), ('pin_in4', 23),
@@ -60,29 +59,39 @@ class MotorControllerNode(Node):
         self._last_cmd = self.get_clock().now()
         lin = msg.linear.x
         ang = msg.angular.z
-        # Differential drive kinematics
         v_left  = (lin - ang * self.wheel_sep / 2.0)
         v_right = (lin + ang * self.wheel_sep / 2.0)
         self._set_motors(v_left, v_right)
 
     def _set_motors(self, v_left: float, v_right: float):
         self.get_logger().info(f'v_left={v_left:.2f} v_right={v_right:.2f}')
+
+        DEAD_ZONE = 0.01  # below this treat as zero to avoid motor hum
+
         def to_pwm(v):
             pct = abs(v) / self.max_speed * 100.0
             return min(max(pct, 0.0), 100.0)
 
-        # Left motor direction
-        GPIO.output(self.IN1, v_left >= 0)
-        GPIO.output(self.IN2, v_left < 0)
-        # Right motor direction
-        GPIO.output(self.IN3, v_right >= 0)
-        GPIO.output(self.IN4, v_right < 0)
-        # PWM duty cycle
+        # Left motor — both pins LOW = coast, avoids hum at zero
+        if abs(v_left) < DEAD_ZONE:
+            GPIO.output(self.IN1, False)
+            GPIO.output(self.IN2, False)
+        else:
+            GPIO.output(self.IN1, v_left > 0)
+            GPIO.output(self.IN2, v_left < 0)
+
+        # Right motor
+        if abs(v_right) < DEAD_ZONE:
+            GPIO.output(self.IN3, False)
+            GPIO.output(self.IN4, False)
+        else:
+            GPIO.output(self.IN3, v_right > 0)
+            GPIO.output(self.IN4, v_right < 0)
+
         self.pwm_a.ChangeDutyCycle(to_pwm(v_left))
         self.pwm_b.ChangeDutyCycle(to_pwm(v_right))
 
     def _watchdog(self):
-        """Stop motors if no cmd_vel received within timeout."""
         elapsed = (self.get_clock().now() - self._last_cmd).nanoseconds / 1e9
         if elapsed > self._watchdog_timeout:
             self._set_motors(0.0, 0.0)

@@ -36,31 +36,31 @@ class ArucoDetectorNode(Node):
         ])
 
         p = lambda n: self.get_parameter(n).value
-        self.dock_id       = p('dock_marker_id')
-        self.stop_dist     = p('dock_approach_distance')
-        self.kp            = p('pid_lateral_kp')
-        self.ki            = p('pid_lateral_ki')
-        self.kd            = p('pid_lateral_kd')
-        self.approach_v    = p('approach_linear_speed')
+        self.dock_id    = p('dock_marker_id')
+        self.stop_dist  = p('dock_approach_distance')
+        self.kp         = p('pid_lateral_kp')
+        self.ki         = p('pid_lateral_ki')
+        self.kd         = p('pid_lateral_kd')
+        self.approach_v = p('approach_linear_speed')
 
-        aruco_dict_name = p('aruco_dict')
+        aruco_dict_name   = p('aruco_dict')
         self.aruco_dict   = aruco.getPredefinedDictionary(getattr(aruco, aruco_dict_name))
         self.aruco_params = aruco.DetectorParameters()
         self.detector     = aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
 
         self.bridge = CvBridge()
-        self.active = False   # only servo when APPROACHING_DOCK
-        self._integral = 0.0
+        self.active = False
+        self._integral   = 0.0
         self._prev_error = 0.0
 
-        # Camera calibration (replace with your calibrated values)
+        # Camera calibration — replace with calibrated values after running camera_calibration
         self.camera_matrix = np.array([[600, 0, 320], [0, 600, 240], [0, 0, 1]], dtype=float)
         self.dist_coeffs   = np.zeros((5, 1))
-        self.marker_size   = 0.10  # meters (10cm marker)
+        self.marker_size   = 0.10  # metres — must match the physical marker
 
-        self.cmd_pub   = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.img_pub   = self.create_publisher(Image, '/camera/aruco_view', 10)
-        self.dock_pub  = self.create_publisher(Bool, '/docking_complete', 10)
+        self.cmd_pub  = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.img_pub  = self.create_publisher(Image, '/camera/aruco_view', 10)
+        self.dock_pub = self.create_publisher(Bool, '/docking_complete', 10)
 
         self.create_subscription(Image,  '/camera/image_raw', self._image_cb, 10)
         self.create_subscription(String, '/robot_state',      self._state_cb, 10)
@@ -70,7 +70,7 @@ class ArucoDetectorNode(Node):
     def _state_cb(self, msg: String):
         self.active = (msg.data == 'APPROACHING_DOCK')
         if not self.active:
-            self._integral = 0.0
+            self._integral   = 0.0
             self._prev_error = 0.0
 
     def _image_cb(self, msg: Image):
@@ -79,38 +79,52 @@ class ArucoDetectorNode(Node):
 
         if ids is not None:
             aruco.drawDetectedMarkers(frame, corners, ids)
+
+            # 3D object points for a square marker centred at origin
+            half = self.marker_size / 2.0
+            obj_pts = np.array([
+                [-half,  half, 0],
+                [ half,  half, 0],
+                [ half, -half, 0],
+                [-half, -half, 0],
+            ], dtype=np.float32)
+
             for i, marker_id in enumerate(ids.flatten()):
                 if marker_id == self.dock_id:
-                    rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
-                        [corners[i]], self.marker_size, self.camera_matrix, self.dist_coeffs)
+                    # estimatePoseSingleMarkers was removed in OpenCV 4.8+
+                    # solvePnP is the correct replacement — same result, explicit API
+                    img_pts = corners[i][0].astype(np.float32)
+                    ok, rvec, tvec = cv2.solvePnP(
+                        obj_pts, img_pts, self.camera_matrix, self.dist_coeffs)
+                    if not ok:
+                        continue
                     cv2.drawFrameAxes(frame, self.camera_matrix, self.dist_coeffs,
-                                      rvecs[0], tvecs[0], 0.05)
+                                      rvec, tvec, 0.05)
+                    z_dist = float(tvec[2][0])  # distance along camera Z axis
                     if self.active:
-                        self._servo(corners[i], tvecs[0][0][2], frame.shape[1])
+                        self._servo(corners[i], z_dist, frame.shape[1])
 
         self.img_pub.publish(self.bridge.cv2_to_imgmsg(frame, 'bgr8'))
 
     def _servo(self, corner, z_dist: float, img_width: int):
-        """PID lateral correction + forward control."""
-        cx = int(np.mean(corner[0][:, 0]))
-        error = cx - img_width / 2   # positive = marker is right of center
+        """PID lateral correction. Error = pixels the marker centre is off-screen-centre."""
+        cx    = int(np.mean(corner[0][:, 0]))
+        error = cx - img_width / 2   # positive → marker is right of centre
 
         self._integral  += error * 0.033
         derivative       = (error - self._prev_error) / 0.033
         angular_z        = -(self.kp * error + self.ki * self._integral + self.kd * derivative)
         self._prev_error = error
 
-        twist = Twist()
+        twist           = Twist()
         twist.angular.z = float(np.clip(angular_z, -1.0, 1.0))
 
         if z_dist > self.stop_dist:
             twist.linear.x = self.approach_v
         else:
-            # Close enough — creep forward at 4 cm/s for final contact
-            twist.linear.x = 0.04
+            twist.linear.x = 0.04  # creep forward for final contact
 
-        if z_dist < 0.05:
-            # Contact!
+        if z_dist < 0.05:  # ~5 cm — contact
             twist.linear.x = 0.0
             self.cmd_pub.publish(twist)
             self.dock_pub.publish(Bool(data=True))

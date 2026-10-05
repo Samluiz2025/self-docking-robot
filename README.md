@@ -1,168 +1,75 @@
-# Self-Docking Robot — ROS2 + SLAM + Live Web Dashboard
+# Self-Docking Robot (ROS2 Humble · Raspberry Pi 4)
 
-A fully autonomous mobile robot that maps its environment, navigates on its own, and finds its way back to a charging dock when the battery gets low — all visible in real time from a web browser.
+An autonomous differential-drive robot that detects its charging dock with computer vision and is being developed to dock itself when its battery runs low. Built on a Raspberry Pi 4 with ROS2 Humble, structured as modular packages for motor control, sensing, vision and state management.
 
-Built on a Raspberry Pi 4 running ROS2 Humble, using SLAM Toolbox for mapping, Nav2 for path planning, and a combination of IR beacon detection and ArUco marker visual servoing for precise docking.
-
----
-
-## What it does
-
-The robot starts up and begins exploring its environment. As it moves, it builds an occupancy grid map using SLAM (Simultaneous Localization and Mapping). Once it has a map, it can navigate autonomously to any point you click on the dashboard — planning a path, avoiding obstacles, and correcting itself in real time.
-
-When the battery drops below 20%, the robot switches into docking mode on its own. It rotates until it picks up the IR beacon signal from the charging dock, drives toward it, and then switches to visual servoing — using an ArUco marker on the dock face and a PID controller to align itself precisely before making contact.
-
-The whole thing is visible from a browser. The live dashboard shows the SLAM map with the robot's current position, battery voltage and current draw over time, obstacle sensor readings, camera feed, and a log of everything the robot is doing.
+> **Status: in active development.** Core hardware nodes, ArUco pose estimation and the docking state machine are implemented. Nav2 integration and physical docking trials are in progress. See [Project Status](#project-status) for details.
 
 ---
 
-## Demo
+## Project Status
 
-> Video coming soon — will be linked here after Phase 5.
+| Component | Status |
+|---|---|
+| Modular ROS2 package structure | ✅ Done |
+| Motor control (L298N differential drive) | ✅ Done |
+| Ultrasonic obstacle detection (2× HC-SR04, 30 cm range) | ✅ Working, tuning in progress |
+| ArUco marker detection + 3D pose estimation (OpenCV, `cv2.solvePnP`) | ✅ Done |
+| Battery monitoring over I2C (INA219) | ✅ Done |
+| 5-state docking state machine | ✅ Implemented |
+| Wheel odometry | 🔧 In progress |
+| Gazebo simulation (URDF) | 🔧 In progress |
+| Web dashboard | 🔧 In progress |
+| Nav2 navigation | 🔧 In progress |
+| Physical docking trials | 📋 Next step |
+| SLAM mapping with 2D lidar | 📋 Planned |
+| IR beacon for long-range dock finding | 📋 Planned |
+| Demo video and measured results | 📋 After docking trials |
+
+---
+
+## How It Works
+
+1. **Normal operation:** the robot drives and avoids obstacles using two front ultrasonic sensors.
+2. **Battery monitoring:** an INA219 sensor reads battery voltage over I2C. When it drops below a threshold, the state machine switches to docking mode.
+3. **Finding the dock:** the camera searches for an ArUco marker mounted on the dock.
+4. **Pose estimation:** once the marker is visible, OpenCV and `cv2.solvePnP` estimate the dock's 3D position and orientation relative to the robot.
+5. **Docking:** the robot uses that pose to align and approach the dock, then charges and undocks when finished.
+
+### State Machine
+
+```
+IDLE ──(low battery)──▶ SEEKING_DOCK ──(marker found)──▶ DOCKING
+  ▲                                                        │
+  │                                                    (contact)
+  │                                                        ▼
+  └────────────(charged)──── UNDOCKING ◀──(charged)──── CHARGING
+```
 
 ---
 
 ## Hardware
 
-| Component | Purpose | Cost (approx.) |
-|-----------|---------|---------------|
-| Raspberry Pi 4 Model B 2GB | Robot brain | €75 |
-| 2WD Smart Car Chassis Kit | Base frame + motors | €13 |
-| L298N Motor Driver | Controls the two drive motors | €5 |
-| 2x HC-SR04 Ultrasonic Sensor | Obstacle detection | €4 |
-| Logitech C270 Webcam | ArUco marker detection | €25 |
-| INA219 Current/Voltage Sensor | Battery monitoring | €4 |
-| IR LED + TSOP38238 IR Receiver | Dock beacon system | €4 |
-| 3x 18650 Li-ion Cells + BMS | 11.1V power supply | €20 |
-| RPLIDAR A1 | 2D lidar for SLAM | €45 |
-| Misc (screws, wire, SD card, etc.) | Assembly hardware | €20 |
+| Component | Purpose |
+|---|---|
+| Raspberry Pi 4 Model B | Main computer |
+| 2WD chassis with DC motors | Robot base |
+| L298N motor driver | Drives both motors |
+| 2× HC-SR04 ultrasonic sensors | Obstacle detection |
+| Logitech C270 webcam | ArUco marker detection |
+| INA219 current/voltage sensor | Battery monitoring (I2C) |
+| 3× 18650 Li-ion cells + BMS | Power supply |
 
-**Total: ~€215**
+Planned additions: RPLIDAR A1 (for SLAM) and an IR LED + TSOP38238 receiver (for long-range dock detection).
 
 ---
 
 ## Software Stack
 
-Everything used is free and open source — no subscriptions, no cloud dependencies, runs entirely on the Pi.
-
-- **Ubuntu 22.04 Server (ARM64)** — base OS on Raspberry Pi
-- **ROS2 Humble** — robot middleware, handles all inter-process communication
-- **SLAM Toolbox** — real-time simultaneous localization and mapping
-- **Nav2** — autonomous path planning, local obstacle avoidance, recovery behaviors
-- **Gazebo Classic 11** — simulation environment (used for development before hardware)
-- **OpenCV + cv_bridge** — camera processing and ArUco detection
-- **rosbridge_suite** — WebSocket bridge so the browser can talk to ROS2
-- **roslibjs / nav2d.js / Chart.js** — live web dashboard frontend
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                  Raspberry Pi 4                      │
-│                                                      │
-│  ┌──────────┐  ┌──────────┐  ┌────────────────────┐ │
-│  │ SLAM     │  │  Nav2    │  │  State Machine     │ │
-│  │ Toolbox  │  │  Stack   │  │  (Idle/Seek/Dock)  │ │
-│  └────┬─────┘  └────┬─────┘  └────────┬───────────┘ │
-│       │             │                 │              │
-│  ┌────▼─────────────▼─────────────────▼───────────┐ │
-│  │              ROS2 Topic Bus                     │ │
-│  └────┬──────────┬──────────┬──────────┬──────────┘ │
-│       │          │          │          │             │
-│  ┌────▼──┐  ┌────▼──┐  ┌───▼───┐  ┌───▼──────────┐ │
-│  │ Motor │  │Sensors│  │Camera │  │  rosbridge   │ │
-│  │Driver │  │(USS,  │  │+ArUco │  │  WebSocket   │ │
-│  │ Node  │  │INA219,│  │ Node  │  │  Server      │ │
-│  └───────┘  │  IR)  │  └───────┘  └──────┬───────┘ │
-│             └───────┘                     │         │
-└───────────────────────────────────────────┼─────────┘
-                                            │ ws://robot-ip:9090
-                                     ┌──────▼──────┐
-                                     │  Browser    │
-                                     │  Dashboard  │
-                                     │ (any device │
-                                     │  on WiFi)   │
-                                     └─────────────┘
-```
-
----
-
-## Docking Algorithm
-
-The docking sequence has two stages:
-
-**Stage 1 — Coarse (IR beacon):**
-The robot rotates slowly in place until its IR receiver picks up the 38kHz beacon signal from the dock. Once detected, it drives toward the signal while watching for the ArUco marker to come into camera view.
-
-**Stage 2 — Fine (ArUco visual servoing):**
-When the ArUco marker is visible, a PID controller takes over. The error signal is the horizontal pixel offset of the marker center from the image center — the robot steers to zero this error while driving forward. A second controller uses the marker's estimated Z distance to control approach speed. The robot stops at ~15cm, then creeps in at 4cm/s until ultrasonic reads contact.
-
-This two-stage approach is robust: IR handles long range (up to ~2m, ±45°) and ArUco handles precision (sub-5cm alignment).
-
----
-
-## State Machine
-
-```
-IDLE ──(battery < 20%)──▶ LOW_BATTERY
-  ▲                              │
-  │                    (Nav2 goal: dock area)
-  │                              ▼
-DOCKED ◀──(contact)── APPROACHING_DOCK ◀──(ArUco seen)── SEEKING_DOCK
-                                                               ▲
-                                               (IR detected)   │
-                                          LOW_BATTERY ──────────┘
-```
-
----
-
-## How to Run
-
-### Prerequisites
-
-- Raspberry Pi 4 (2GB+ RAM) with Ubuntu 22.04 Server
-- ROS2 Humble installed
-- All hardware wired according to `docs/wiring.md`
-
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/samueludoba19/self-docking-robot.git
-cd self-docking-robot
-```
-
-### 2. Install dependencies
-
-```bash
-sudo apt install ros-humble-slam-toolbox ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-rosbridge-suite ros-humble-usb-cam -y
-pip3 install adafruit-circuitpython-ina219 opencv-contrib-python RPi.GPIO
-```
-
-### 3. Build the workspace
-
-```bash
-cd ~/robot_ws
-colcon build --symlink-install
-source install/setup.bash
-```
-
-### 4. Launch everything
-
-```bash
-ros2 launch robot_bringup robot.launch.py
-```
-
-### 5. Open the dashboard
-
-Open a browser on any device connected to the same WiFi:
-
-```
-http://<raspberry-pi-ip>:8000
-```
-
-You'll see the live map, telemetry, and camera feed. Click anywhere on the free space in the map to send a navigation goal.
+- **Ubuntu 22.04 Server (ARM64)** on the Raspberry Pi
+- **ROS2 Humble** for communication between nodes
+- **OpenCV** for camera processing and ArUco pose estimation
+- **Nav2** for navigation (integration in progress)
+- **Gazebo Classic** for simulation (in progress)
 
 ---
 
@@ -170,59 +77,61 @@ You'll see the live map, telemetry, and camera feed. Click anywhere on the free 
 
 ```
 self-docking-robot/
-├── robot_bringup/          # Main launch files
-├── motor_controller/       # L298N differential drive node
-├── odometry/               # Encoder-based odometry publisher
-├── sensor_nodes/           # Ultrasonic, INA219, IR beacon nodes
-├── aruco_detector/         # Camera + ArUco pose estimation
-├── state_machine/          # Autonomous docking state machine
-├── dashboard/              # HTML/CSS/JS web dashboard
-├── maps/                   # Saved SLAM maps
-├── config/                 # Nav2 params, SLAM config, hardware params
-├── simulation/             # Gazebo URDF + world files
-└── docs/                   # Wiring diagrams, calibration notes
+├── robot_bringup/      # Launch files
+├── motor_controller/   # L298N differential drive node
+├── odometry/           # Wheel odometry (in progress)
+├── sensor_nodes/       # Ultrasonic and INA219 nodes
+├── aruco_detector/     # Camera + ArUco pose estimation
+├── state_machine/      # Docking state machine
+├── dashboard/          # Web dashboard (in progress)
+├── simulation/urdf/    # Robot model for Gazebo
+└── docs/               # Wiring and notes
 ```
 
 ---
 
-## Results
+## How to Run
 
-| Metric | Value |
-|--------|-------|
-| Docking success rate | ~85% (from various positions up to 2m) |
-| Average docking time | ~45 seconds (seek → contact) |
-| Nav2 goal success rate | ~90% (in mapped environment) |
-| Map resolution | 5cm/cell |
-| Dashboard latency | <200ms (local WiFi) |
-| CPU usage (full operation) | ~70% average |
+**Requirements:** Raspberry Pi 4 with Ubuntu 22.04 Server, ROS2 Humble, hardware wired as described in `docs/`.
 
----
+```bash
+# Clone into a ROS2 workspace
+mkdir -p ~/robot_ws/src && cd ~/robot_ws/src
+git clone https://github.com/Samluiz2025/self-docking-robot.git
 
-## What I Learned
+# Python dependencies
+pip3 install adafruit-circuitpython-ina219 opencv-contrib-python RPi.GPIO
 
-This project pushed me across the full robotics stack — embedded Linux, hardware wiring, ROS2 middleware, SLAM, autonomous navigation, computer vision, PID control, and web development all in one build. The biggest lessons:
+# Build
+cd ~/robot_ws
+colcon build --symlink-install
+source install/setup.bash
 
-- Real-world sensor noise is nothing like simulation. Tuning Nav2 on actual hardware takes 10x longer than in Gazebo, and the parameters that work are completely different.
-- SLAM accuracy depends heavily on driving speed. Above ~0.25 m/s the maps get noticeably worse due to scan matching latency on the Pi.
-- The two-stage docking (IR + ArUco) is significantly more robust than trying to do either alone. IR gives range and angle, ArUco gives precision — neither alone would reliably dock.
-- rosbridge makes web integration almost trivial once you understand the message format. The hardest part was rendering the occupancy grid map on a canvas efficiently enough to not lag the browser.
-
----
-
-## Future Ideas
-
-- Add voice control via speech_recognition
-- Expose dashboard globally via ngrok for remote monitoring
-- Replace simulated battery depletion with real INA219-triggered docking
-- Multi-floor mapping with elevator detection
-- Write a blog post about the build process
+# Launch
+ros2 launch robot_bringup robot.launch.py
+```
 
 ---
 
-## License
+## Roadmap
 
-MIT — do whatever you want with it, attribution appreciated.
+1. Finish Nav2 integration and tune obstacle avoidance on real hardware
+2. Run physical docking trials and record success rate and docking time
+3. Add a demo video
+4. Add 2D lidar and SLAM mapping
+5. Add IR beacon for finding the dock from longer distances
+
+Results will be added here once they are measured on the real robot.
 
 ---
 
-*Built by Samuel Udoba — Automation Engineering Student, Graz, Austria*
+## What I'm Learning
+
+- Structuring a robot as separate ROS2 packages that communicate through topics
+- Turning camera images into usable 3D position data with ArUco markers and `solvePnP`
+- Designing a state machine that reacts to real sensor readings
+- How much harder tuning on real hardware is compared to the plan
+
+---
+
+*Built by Samuel Udoba, Smart Automation student at FH Campus 02, Graz, Austria. License: MIT.*
